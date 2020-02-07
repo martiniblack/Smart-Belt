@@ -7,6 +7,9 @@ import matplotlib.pyplot as plt
 from scipy.stats import mannwhitneyu, wilcoxon
 from sklearn import svm
 from sklearn.model_selection import LeaveOneOut
+from entropy import spectral_entropy
+from mlxtend.plotting import plot_decision_regions
+from mpl_toolkits.mplot3d import axes3d, Axes3D
 from scipy import signal
 
 from sklearn.model_selection import cross_val_score
@@ -37,6 +40,8 @@ def butter_lowpass_filter(data, cutoff, fs, order=5):
 def findAverageDPAndDF(windowSlices) :
     DP_list = []
     DF_list = []
+
+    entrop_list = []
     for i in range(windowSlices.shape[0]) :
         fft = np.fft.fft(windowSlices[i])
         n = windowSlices[i].size
@@ -44,12 +49,18 @@ def findAverageDPAndDF(windowSlices) :
         DP_list.append(np.max(np.abs(fft)))
         DF_list.append(freq[np.argmax(np.abs(fft))])
 
+        entrop_list.append(np.round(spectral_entropy(windowSlices[i], 1000, method='fft'), 2))
+
     DP_AVG = np.mean(DP_list)
     DF_AVG = np.mean(DF_list)
     DP_STD = np.std(DP_list)
     DF_STD = np.std(DF_list)
 
-    return DP_AVG, DF_AVG, DP_STD, DF_STD
+    ENT_AVG = np.mean(entrop_list)
+    ENT_STD = np.std(entrop_list)
+
+
+    return DP_AVG, DF_AVG, DP_STD, DF_STD, ENT_AVG, ENT_STD
 
 def findPercentageFeature(windowSlices) :
     NORM_PC = 0
@@ -84,7 +95,10 @@ def findOverallDPAndDF(raw_data_norm_bef) :
     fft = np.fft.fft(raw_data_norm_bef)
     n = raw_data_norm_bef.size
     freq = np.fft.fftfreq(n, d=0.001)
-    return np.max(np.abs(fft)), freq[np.argmax(np.abs(fft))]
+
+    ENT_OA = np.round(spectral_entropy(raw_data_norm_bef, 1000, method='fft'), 2)
+
+    return np.max(np.abs(fft)), freq[np.argmax(np.abs(fft))], ENT_OA
 
 
 def extractFeaturesFromFile(file) :
@@ -97,21 +111,21 @@ def extractFeaturesFromFile(file) :
     print("STEP 1 : Raw data standardization ... DONE ")
 
     # STEP 2 : Low pass filtering with butterworth
-    raw_data_norm_bef = butter_lowpass_filter(raw_data_norm_bef, 1.5, 1000, order=3)
+    raw_data_norm_bef = butter_lowpass_filter(raw_data_norm_bef, 1, 1000, order=3)
     print("STEP 2 : Butterworth low path filtering ... DONE ")
 
     # STEP 3 : Window of 4min, for each window calculate DF and DP with single sided fast Fourier transform (fft), then we take the average
     winLen = 4*60*1000
-    step = int(0.25*winLen)
+    step = int(0.75*winLen)
 
     sliceList = []
     FeatureList = []
     for i in range(raw_data_norm_bef.shape[0]) :
         sliceList.append(util.view_as_windows(raw_data_norm_bef[i], window_shape=(winLen,), step=step))
-        DP_AVG, DF_AVG, DP_STD, DF_STD = findAverageDPAndDF(sliceList[i])
+        DP_AVG, DF_AVG, DP_STD, DF_STD, ENT_AVG, ENT_STD = findAverageDPAndDF(sliceList[i])
         NORM_PC, BRODY_PC, TACHY_PC, OTHER_PC = findPercentageFeature(sliceList[i])
 
-        DP_OA, DF_OA = findOverallDPAndDF(raw_data_norm_bef[i])
+        DP_OA, DF_OA, ENT_OA = findOverallDPAndDF(raw_data_norm_bef[i])
 
         featureVec = []
         featureVec.append(DP_AVG)
@@ -124,6 +138,9 @@ def extractFeaturesFromFile(file) :
         featureVec.append(OTHER_PC)
         featureVec.append(DP_OA)
         featureVec.append(DF_OA)
+        featureVec.append(ENT_AVG)
+        featureVec.append(ENT_STD)
+        featureVec.append(ENT_OA)
         FeatureList.append(featureVec)
 
     print("STEP 3 : Feature extraction ... DONE ")
@@ -170,28 +187,40 @@ def getFeatureNameByIndex(index) :
         name = "DP_OVERALL_BEFORE"
     elif index == 9 :
         name = "Df_OVERALL_BEFORE"
-    elif index == 10 :
-        name = "DP_AVG_AFTER"
-    elif index == 11 :
-        name = "DF_AVG_AFTER"
+    elif index == 10:
+        name = "ENTROPY_AVG_BEFORE"
+    elif index == 11:
+        name = "ENTROPY_STD_BEFORE"
     elif index == 12:
-        name = "DP_STD_AFTER"
-    elif index == 13:
-        name = "DF_STD_AFTER"
-    elif index == 14:
-        name = "NORM_PC_AFTER"
+        name = "ENTROPY_OA_BEFORE"
+    elif index == 13 :
+        name = "DP_AVG_AFTER"
+    elif index == 14 :
+        name = "DF_AVG_AFTER"
     elif index == 15:
-        name = "BRODY_PC_AFTER"
+        name = "DP_STD_AFTER"
     elif index == 16:
-        name = "TACHY_PC_AFTER"
+        name = "DF_STD_AFTER"
     elif index == 17:
-        name = "OTHER_PC_AFTER"
+        name = "NORM_PC_AFTER"
     elif index == 18:
-        name = "DP_OVERALL_AFTER"
+        name = "BRODY_PC_AFTER"
     elif index == 19:
-        name = "DF_OVERALL_AFTER"
+        name = "TACHY_PC_AFTER"
     elif index == 20:
-        name = "DF_AFTER_BEFORE_RATIO"
+        name = "OTHER_PC_AFTER"
+    elif index == 21:
+        name = "DP_OVERALL_AFTER"
+    elif index == 22:
+        name = "DF_OVERALL_AFTER"
+    elif index == 23:
+        name = "ENTROPY_AVG_AFTER"
+    elif index == 24:
+        name = "ENTROPY_STD_AFTER"
+    elif index == 25:
+        name = "ENTROPY_OA_AFTER"
+    elif index == 26:
+        name = "DP_AFTER_BEFORE_RATIO"
     else :
         name = "UNKNOWN"
 
@@ -211,25 +240,33 @@ def normalizeFeatureVec(feat) :
         feat[:,i] /= np.max(feat[:,i] )
     return feat
 
-def classify(feat, labels) :
+def classify(feat, labels, kernel, C) :
     loo = LeaveOneOut()
     loo.get_n_splits(feat)
     print("JACK KNIFE")
-    clf = svm.SVC(kernel='linear', C=1000)
 
+    clf = svm.SVC(kernel=kernel, C=C, gamma='auto')
     accuracy = 0
     tot = 0
     for train_index, test_index in loo.split(feat):
         X_train, X_test = feat[train_index], feat[test_index]
         y_train, y_test = np.array(labels)[train_index.astype(int)], np.array(labels)[test_index]
         clf.fit(X_train, y_train)
+
         tot += 1
-        print(clf.score(X_test, y_test))
         if clf.score(X_test, y_test) == 1 :
             accuracy += 1
+        else :
+            plot_decision_regions(X_train, y_train, clf=clf, legend=1)
 
     accuracy /= float(tot)
     print(accuracy)
+    return accuracy
+
+def plotClusterRepresentation(feat, labels, idx1, idx2, title):
+    plt.scatter(feat[:, idx1], feat[:, idx2], c=labels)
+    plt.title(title)
+    plt.show()
 
 
 def main():
@@ -248,14 +285,20 @@ def main():
 
     norm_feat_relevant = []
     pd_feat_relevant = []
-
+    norm_feat_relevant_best = []
+    pd_feat_relevant_best = []
+    p_val = []
     for i in range (norm_feat.shape[1]) :
         stat, pvalue = mannwhitneyu(norm_feat[:, i], pd_feat[:, i]) #wilcoxon(norm_feat[:8, i], pd_feat[:, i])
         print("p value " + str(pvalue) + " found for feature " + getFeatureNameByIndex(i))
-        if pvalue < 0.04:
-            #print("Relevant feature found for feature " + getFeatureNameByIndex(i) )
+        p_val.append(pvalue)
+        if ((pvalue < 0.04) ):
+            print("Relevant feature found for feature " + getFeatureNameByIndex(i) )
             norm_feat_relevant.append(norm_feat[:,i])
             pd_feat_relevant.append(pd_feat[:,i])
+
+    norm_feat_relevant_best.append(norm_feat[:, i])
+    pd_feat_relevant_best.append(pd_feat[:, i])
 
     labels = []
     for j in range(np.array(norm_feat_relevant).shape[1]) :
@@ -264,14 +307,27 @@ def main():
     for k in range(np.array(pd_feat_relevant).shape[1]):
         labels.append(1)
 
-
-
     feat = np.concatenate((norm_feat_relevant, pd_feat_relevant), axis=1).T
-    #print(feat.shape)
-    #print(labels)
     feat = normalizeFeatureVec(feat)
 
-    classify(feat, labels)
+    accList = []
+    print("Features : DP_OVERALL_AFTER & DP_AFTER_BEFORE_RATIO...")
+    accList.append(classify(feat[:,[2, 5]], labels,'linear',100))
+
+    print("Features : ENTROPY_AVG_BEFORE & DP_OVERALL_AFTER & DP_AFTER_BEFORE_RATIO...")
+    accList.append(classify(feat[:,[0, 2, 5]], labels,'rbf',200))
+
+    print("Features : ENTROPY_AVG_BEFORE & ENTROPY_OA_AFTER, lin 100")
+    accList.append(classify(feat[:,[0, 4]], labels,'linear',100))
+
+    print("Features : All 6...")
+    accList.append(classify(feat, labels,'rbf',1000))
+
+
+    plotClusterRepresentation(feat[:,[2, 5]], labels, 0, 1, "Features : DP_OVERALL_AFTER & DP_AFTER_BEFORE_RATIO")
+    plotClusterRepresentation(feat[:,[0, 4]], labels, 0, 1, "Features : ENTROPY_AVG_BEFORE & ENTROPY_OA_AFTER")
+    plotClusterRepresentation(feat[:,[0, 5]], labels, 0, 1, "Features : DP_OVERALL_AFTER & DP_AFTER_BEFORE_RATIO")
+
 
 if __name__ == "__main__":
     main()
